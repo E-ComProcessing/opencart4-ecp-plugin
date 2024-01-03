@@ -144,7 +144,7 @@ class EcomprocessingDirect extends BaseController
 					),
 
 					'currency'           => $this->model_extension_ecomprocessing_payment_ecomprocessing_direct->getCurrencyCode(),
-					'amount'             => $order_info['total'],
+					'amount'             => (float)$order_info['total'],
 
 					'customer_email'     => $order_info['email'],
 					'customer_phone'     => $order_info['telephone'],

@@ -49,7 +49,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @var string
 	 */
-	protected $module_version = '1.1.0';
+	protected $module_version = '1.1.3';
 
 	/**
 	 * Perform installation logic
@@ -70,7 +70,7 @@ class EcomprocessingCheckout extends Model
 			  `message` VARCHAR(255) NULL,
 			  `technical_message` VARCHAR(255) NULL,
 			  `terminal_token` VARCHAR(255) NULL,
-			  `amount` DECIMAL( 10, 2 ) DEFAULT NULL,
+			  `amount` DECIMAL( 15, 4 ) DEFAULT NULL,
 			  `currency` CHAR(3) NULL,
 			  PRIMARY KEY (`unique_id`)
 			) ENGINE=InnoDB DEFAULT COLLATE=utf8_general_ci;
