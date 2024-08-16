@@ -19,13 +19,13 @@
 
 namespace Opencart\Catalog\Model\Extension\Ecomprocessing\Payment;
 
-use Genesis\API\Constants\Endpoints;
-use Genesis\API\Constants\Environments;
-use Genesis\API\Constants\Payment\Methods;
-use Genesis\API\Constants\Transaction\States;
-use Genesis\API\Constants\Transaction\Types;
+use Genesis\Api\Constants\Endpoints;
+use Genesis\Api\Constants\Environments;
+use Genesis\Api\Constants\Payment\Methods;
+use Genesis\Api\Constants\Transaction\States;
+use Genesis\Api\Constants\Transaction\Types;
 use Genesis\Config;
-use Genesis\Exceptions\ErrorAPI;
+use Genesis\Exceptions\InvalidArgument;
 use Genesis\Genesis;
 use Genesis\Utils\Common as CommonUtils;
 use Opencart\Catalog\Model\Extension\Ecomprocessing\Payment\Ecomprocessing\BaseModel;
@@ -35,6 +35,8 @@ use Opencart\Extension\Ecomprocessing\System\EcomprocessingHelper;
  * Front-end model for the "ecomprocessing Checkout" module
  *
  * @package EcomprocessingCheckout
+ *
+ * @SuppressWarnings(PHPMD.ExcessiveClassComplexity)
  */
 class EcomprocessingCheckout extends BaseModel
 {
@@ -46,19 +48,23 @@ class EcomprocessingCheckout extends BaseModel
 	protected $module_name = 'ecomprocessing_checkout';
 
 	/**
+	 * Module Code used in the payment process
+	 */
+	const METHOD_CODE = 'ecomprocessing_checkout.ecomprocessing_checkout';
+
+	/**
 	 * Main method
 	 *
 	 * @param $address //Order Address
 	 *
 	 * @return array
 	 */
-	public function getMethods($address): array
-	{
+	public function getMethods($address): array {
 		$this->load->language('extension/ecomprocessing/payment/ecomprocessing_checkout');
 
 		if (!$this->config->get('ecomprocessing_checkout_geo_zone_id')) {
 			$status = true;
-		}  elseif (!$this->config->get('config_checkout_payment_address')) {
+		} elseif (!$this->config->get('config_checkout_payment_address')) {
 			// this is "Billing Address required" from store settings. If unchecked, no further checks are needed
 			$status = true;
 		} else {
@@ -68,8 +74,9 @@ class EcomprocessingCheckout extends BaseModel
 		$method_data = array();
 
 		if ($status) {
+			$option_data = array();
 			$option_data['ecomprocessing_checkout'] = [
-				'code' => 'ecomprocessing_checkout.ecomprocessing_checkout',
+				'code' => self::METHOD_CODE,
 				'name' => $this->language->get('text_title')
 			];
 
@@ -89,8 +96,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return null|string
 	 */
-	public function getConsumerId($email): null|string
-	{
+	public function getConsumerId($email): null|string {
 		$query = $this->db->query("
 			SELECT * FROM
 				`" . DB_PREFIX . "ecomprocessing_checkout_consumers`
@@ -109,9 +115,19 @@ class EcomprocessingCheckout extends BaseModel
 	 * @param $email
 	 * @param $consumer_id
 	 */
-	public function addConsumer($email, $consumer_id): void
-	{
+	public function addConsumer($email, $consumer_id): void {
 		try {
+			$query = $this->db->query("
+				SELECT * FROM
+					`" . DB_PREFIX . "ecomprocessing_checkout_consumers`
+				WHERE
+					`customer_email` = '" . $this->db->escape($email) . "' LIMIT 1
+			");
+
+			if ($query->num_rows) {
+				return ;
+			}
+
 			$this->db->query("
 				INSERT INTO
 					`" . DB_PREFIX . "ecomprocessing_checkout_consumers` (`customer_email`, `consumer_id`)
@@ -130,8 +146,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return bool|mixed
 	 */
-	public function getTransactionById($unique_id): mixed
-	{
+	public function getTransactionById($unique_id): mixed {
 		if (isset($unique_id) && !empty($unique_id)) {
 			$query = $this->db->query("
 				SELECT * FROM `" . DB_PREFIX . "ecomprocessing_checkout_transactions`
@@ -154,14 +169,12 @@ class EcomprocessingCheckout extends BaseModel
 	 * @return mixed
 	 *
 	 * @throws \Exception
-	 * @throws ErrorAPI
 	 */
-	public function create($data): mixed
-	{
+	public function create($data): mixed {
 		try {
 			$this->bootstrap();
 
-			$genesis = new Genesis('WPF\Create');
+			$genesis = new Genesis('Wpf\Create');
 
 			$genesis
 				->request()
@@ -206,13 +219,15 @@ class EcomprocessingCheckout extends BaseModel
 				$this->prepareWpfRequestTokenization($genesis);
 			}
 
+			if ($this->isThreedsAllowed()) {
+				$this->addThreedsParamsToRequest($genesis, $data);
+			}
+
 			$genesis->execute();
 
 			$this->saveWpfTokenizationData($genesis);
 
-			return $genesis->response()->getResponseObject();
-		} catch (ErrorAPI $api) {
-			throw $api;
+			return $genesis->response();
 		} catch (\Exception $exception) {
 			$this->logEx($exception);
 
@@ -228,22 +243,18 @@ class EcomprocessingCheckout extends BaseModel
 	 * @return mixed
 	 *
 	 * @throws \Exception
-	 * @throws ErrorAPI
 	 */
-	public function reconcile($unique_id): mixed
-	{
+	public function reconcile($unique_id): mixed {
 		try {
 			$this->bootstrap();
 
-			$genesis = new Genesis('WPF\Reconcile');
+			$genesis = new Genesis('Wpf\Reconcile');
 
 			$genesis->request()->setUniqueId($unique_id);
 
 			$genesis->execute();
 
 			return $genesis->response()->getResponseObject();
-		} catch (ErrorAPI $api) {
-			throw $api;
 		} catch (\Exception $exception) {
 			$this->logEx($exception);
 
@@ -254,30 +265,12 @@ class EcomprocessingCheckout extends BaseModel
 	/**
 	 * Bootstrap Genesis Library
 	 *
+	 * @throws InvalidArgument
+	 *
 	 * @return void
 	 */
-	public function bootstrap(): void
-	{
-		// Look for, but DO NOT try to load via Auto-loader magic methods
-		if (!class_exists('\Genesis\Genesis', false)) {
-			include DIR_STORAGE . 'vendor/genesisgateway/genesis_php/vendor/autoload.php';
-
-			Config::setEndpoint(
-				Endpoints::ECOMPROCESSING
-			);
-
-			Config::setUsername(
-				$this->config->get('ecomprocessing_checkout_username')
-			);
-
-			Config::setPassword(
-				$this->config->get('ecomprocessing_checkout_password')
-			);
-
-			Config::setEnvironment(
-				$this->config->get('ecomprocessing_checkout_sandbox') ? Environments::STAGING : Environments::PRODUCTION
-			);
-		}
+	public function bootstrap(): void {
+		parent::bootstrap();
 	}
 
 	/**
@@ -288,25 +281,10 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return string
 	 */
-	public function genTransactionId($prefix = ''): string
-	{
+	public function genTransactionId($prefix = ''): string {
 		$hash = md5(microtime(true) . uniqid() . mt_rand(PHP_INT_SIZE, PHP_INT_MAX));
 
 		return $prefix . substr($hash, -(strlen($hash) - strlen($prefix)));
-	}
-
-	/**
-	 * Get the Order Products stored in the Database
-	 *
-	 * @param $order_id
-	 *
-	 * @return mixed
-	 */
-	public function getDbOrderProducts($order_id): mixed
-	{
-		$query = $this->db->query("SELECT * FROM " . DB_PREFIX . "order_product	WHERE order_id = '" . (int)$order_id . "'");
-
-		return $query->rows;
 	}
 
 	/**
@@ -316,30 +294,10 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return mixed
 	 */
-	public function getOrderTotals($order_id): mixed
-	{
+	public function getOrderTotals($order_id): mixed {
 		$query = $this->db->query("SELECT * FROM " . DB_PREFIX . "order_total WHERE	order_id = '" . (int)$order_id . "' ORDER BY sort_order");
 
 		return $query->rows;
-	}
-
-	/**
-	 * Get Products Information
-	 *
-	 * @param array $products
-	 *
-	 * @return mixed
-	 */
-	public function getProductsInfo($products = array()): mixed
-	{
-		$ids = array();
-		foreach ($products as $product) {
-			array_push($ids, abs((int)$product));
-		}
-
-		$products_resource = $this->db->query("SELECT *	FROM " . DB_PREFIX . "product WHERE product_id IN (" . implode(', ', $ids) . ")");
-
-		return $products_resource->rows;
 	}
 
 	/**
@@ -347,21 +305,15 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return array
 	 */
-	public function getTransactionTypes(): array
-	{
+	public function getTransactionTypes(): array {
 		$processed_list = array();
 		$alias_map = array();
 
 		$selected_types = $this->orderCardTransactionTypes(
 			$this->config->get('ecomprocessing_checkout_transaction_type')
 		);
-		$methods = Methods::getMethods();
 
-		foreach ($methods as $method) {
-			$alias_map[$method . self::PPRO_TRANSACTION_SUFFIX] = Types::PPRO;
-		}
-
-		$alias_map = array_merge($alias_map, [
+		$alias_map = [
 			self::GOOGLE_PAY_TRANSACTION_PREFIX . self::GOOGLE_PAY_PAYMENT_TYPE_AUTHORIZE =>
 				Types::GOOGLE_PAY,
 			self::GOOGLE_PAY_TRANSACTION_PREFIX . self::GOOGLE_PAY_PAYMENT_TYPE_SALE      =>
@@ -376,7 +328,7 @@ class EcomprocessingCheckout extends BaseModel
 				Types::APPLE_PAY,
 			self::APPLE_PAY_TRANSACTION_PREFIX . self::APPLE_PAY_PAYMENT_TYPE_SALE        =>
 				Types::APPLE_PAY,
-		]);
+		];
 
 		foreach ($selected_types as $selected_type) {
 			if (array_key_exists($selected_type, $alias_map)) {
@@ -390,7 +342,6 @@ class EcomprocessingCheckout extends BaseModel
 				$processed_list[$transaction_type]['parameters'][] = array(
 					$key => str_replace(
 						[
-							self::PPRO_TRANSACTION_SUFFIX,
 							self::GOOGLE_PAY_TRANSACTION_PREFIX,
 							self::PAYPAL_TRANSACTION_PREFIX,
 							self::APPLE_PAY_TRANSACTION_PREFIX
@@ -415,8 +366,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @throws \Genesis\Exceptions\ErrorParameter
 	 */
-	public function addTransactionTypesToGatewayRequest(Genesis $genesis, $order): void
-	{
+	public function addTransactionTypesToGatewayRequest(Genesis $genesis, $order): void {
 		$types = $this->isRecurringOrder() ? $this->getRecurringTransactionTypes() : $this->getTransactionTypes();
 
 		foreach ($types as $type) {
@@ -451,9 +401,9 @@ class EcomprocessingCheckout extends BaseModel
 	 * @return array
 	 *
 	 * @throws \Genesis\Exceptions\ErrorParameter
+	 * @SuppressWarnings(PHPMD.CyclomaticComplexity)
 	 */
-	public function getCustomRequiredAttributes($type, $order): array
-	{
+	public function getCustomRequiredAttributes($type, $order): array {
 		$parameters = array();
 		switch ($type) {
 			case Types::IDEBIT_PAYIN:
@@ -502,8 +452,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return array
 	 */
-	public function getRecurringTransactionTypes(): array
-	{
+	public function getRecurringTransactionTypes(): array {
 		return $this->config->get('ecomprocessing_checkout_recurring_transaction_type');
 	}
 
@@ -512,8 +461,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return string
 	 */
-	public function getUsage(): string
-	{
+	public function getUsage(): string {
 		return sprintf('%s checkout transaction', $this->config->get('config_name'));
 	}
 
@@ -522,9 +470,27 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return int
 	 */
-	public function getCurrentUserId(): int
-	{
+	public function getCurrentUserId(): int {
 		return array_key_exists('user_id', $this->session->data) ? $this->session->data['user_id'] : 0;
+	}
+
+	/**
+	 * Get the current front-end language
+	 *
+	 * @return string
+	 */
+	public function getLanguage(): string {
+		$language = isset($this->session->data['language']) ? $this->session->data['language'] : $this->config->get('config_language');
+		$language_code = substr($language, 0, 2);
+
+		$this->bootstrap();
+
+		$constant_name = '\Genesis\Api\Constants\i18n::' . strtoupper($language_code);
+		if (defined($constant_name) && constant($constant_name)) {
+			return strtolower($language_code);
+		}
+
+		return 'en';
 	}
 
 	/**
@@ -532,8 +498,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return null|string
 	 */
-	protected function retrieveConsumerIdFromGenesisGateway($email): null|string
-	{
+	protected function retrieveConsumerIdFromGenesisGateway($email): null|string {
 		try {
 			$genesis = new Genesis('NonFinancial\Consumers\Retrieve');
 			$genesis->request()->setEmail($email);
@@ -557,8 +522,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return bool
 	 */
-	protected function isErrorResponse($response): bool
-	{
+	protected function isErrorResponse($response): bool {
 		$state = new States($response->status);
 
 		return $state->isError();
@@ -569,8 +533,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return void
 	 */
-	protected function prepareWpfRequestTokenization(Genesis $genesis): void
-	{
+	protected function prepareWpfRequestTokenization(Genesis $genesis): void {
 		$genesis->request()->setRememberCard(true);
 
 		$consumer_id = $this->getConsumerId($genesis->request()->getCustomerEmail());
@@ -585,8 +548,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return bool
 	 */
-	protected function isWpfTokenizationEnabled(): bool
-	{
+	protected function isWpfTokenizationEnabled(): bool {
 		return (bool)$this->config->get('ecomprocessing_checkout_wpf_tokenization');
 	}
 
@@ -597,8 +559,7 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return void
 	 */
-	protected function saveWpfTokenizationData($genesis): void
-	{
+	protected function saveWpfTokenizationData($genesis): void {
 		if (!empty($genesis->response()->getResponseObject()->consumer_id)) {
 			$this->addConsumer(
 				$genesis->request()->getCustomerEmail(),
@@ -612,12 +573,8 @@ class EcomprocessingCheckout extends BaseModel
 	 *
 	 * @return string
 	 */
-	private function getCustomParameterKey($transaction_type): string
-	{
+	private function getCustomParameterKey($transaction_type): string {
 		switch ($transaction_type) {
-			case Types::PPRO:
-				$result = 'payment_method';
-				break;
 			case Types::PAY_PAL:
 				$result = 'payment_type';
 				break;
@@ -638,9 +595,8 @@ class EcomprocessingCheckout extends BaseModel
 	 * @param array $selected_types Selected transaction types
 	 * @return array
 	 */
-	private function orderCardTransactionTypes($selected_types)
-	{
-		$custom_order = \Genesis\API\Constants\Transaction\Types::getCardTransactionTypes();
+	private function orderCardTransactionTypes($selected_types) {
+		$custom_order = Types::getCardTransactionTypes();
 
 		asort($selected_types);
 

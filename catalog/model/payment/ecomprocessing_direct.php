@@ -19,11 +19,13 @@
 
 namespace Opencart\Catalog\Model\Extension\Ecomprocessing\Payment;
 
-use Genesis\API\Constants\Endpoints;
-use Genesis\API\Constants\Environments;
-use Genesis\API\Constants\Transaction\Types;
+use Genesis\Api\Constants\Endpoints;
+use Genesis\Api\Constants\Environments;
+use Genesis\Api\Constants\Transaction\Parameters\Threeds\V2\Control\ChallengeWindowSizes;
+use Genesis\Api\Constants\Transaction\Parameters\Threeds\V2\Control\DeviceTypes;
+use Genesis\Api\Constants\Transaction\Types;
 use Genesis\Config;
-use Genesis\Exceptions\ErrorAPI;
+use Genesis\Exceptions\InvalidArgument;
 use Genesis\Genesis;
 use Opencart\Catalog\Model\Extension\Ecomprocessing\Payment\Ecomprocessing\BaseModel;
 use Opencart\Extension\Ecomprocessing\System\EcomprocessingHelper;
@@ -49,8 +51,7 @@ class EcomprocessingDirect extends BaseModel
 	 *
 	 * @return array
 	 */
-	public function getMethods($address): array
-	{
+	public function getMethods($address): array {
 		$this->load->language('extension/ecomprocessing/payment/ecomprocessing_direct');
 
 		if (!$this->config->get('ecomprocessing_direct_geo_zone_id')) {
@@ -69,6 +70,7 @@ class EcomprocessingDirect extends BaseModel
 		$method_data = array();
 
 		if ($status) {
+			$option_data = array();
 			$option_data['ecomprocessing_direct'] = [
 				'code' => 'ecomprocessing_direct.ecomprocessing_direct',
 				'name' => $this->language->get('text_title')
@@ -92,8 +94,7 @@ class EcomprocessingDirect extends BaseModel
 	 *
 	 * @return bool|mixed
 	 */
-	public function getTransactionById($reference_id): mixed
-	{
+	public function getTransactionById($reference_id): mixed {
 		$query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "ecomprocessing_direct_transactions` WHERE `unique_id` = '" . $this->db->escape($reference_id) . "' LIMIT 1");
 
 		if ($query->num_rows) {
@@ -112,8 +113,7 @@ class EcomprocessingDirect extends BaseModel
 	 *
 	 * @throws /Exception
 	 */
-	public function sendTransaction($data): mixed
-	{
+	public function sendTransaction($data): mixed {
 		try {
 			$this->bootstrap();
 
@@ -167,11 +167,14 @@ class EcomprocessingDirect extends BaseModel
 					->setReturnFailureUrl($data['return_failure_url']);
 			}
 
+			if ($this->isThreedsAllowed() && $this->is3dTransaction()) {
+				$this->addThreedsParamsToRequest($genesis, $data);
+				$this->addThreedsBrowserParamsToRequest($genesis, $data);
+			}
+
 			$genesis->execute();
 
-			return $genesis->response()->getResponseObject();
-		} catch (ErrorAPI $api) {
-			throw $api;
+			return $genesis->response();
 		} catch (\Exception $exception) {
 			$this->logEx($exception);
 
@@ -188,20 +191,17 @@ class EcomprocessingDirect extends BaseModel
 	 *
 	 * @throws /Exception
 	 */
-	public function reconcile($unique_id): mixed
-	{
+	public function reconcile($unique_id): mixed {
 		try {
 			$this->bootstrap();
 
-			$genesis = new Genesis('WPF\Reconcile');
+			$genesis = new Genesis('Wpf\Reconcile');
 
 			$genesis->request()->setUniqueId($unique_id);
 
 			$genesis->execute();
 
 			return $genesis->response()->getResponseObject();
-		} catch (ErrorAPI $api) {
-			throw $api;
 		} catch (\Exception $exception) {
 			$this->logEx($exception);
 
@@ -213,53 +213,21 @@ class EcomprocessingDirect extends BaseModel
 	 * Bootstrap Genesis Library
 	 *
 	 * @return void
-	 */
-	public function bootstrap(): void
-	{
-		// Look for, but DO NOT try to load via Auto-loader magic methods
-		if (!class_exists('\Genesis\Genesis', false)) {
-			include DIR_STORAGE . 'vendor/genesisgateway/genesis_php/vendor/autoload.php';
-
-			Config::setEndpoint(
-				Endpoints::ECOMPROCESSING
-			);
-
-			Config::setUsername(
-				$this->config->get('ecomprocessing_direct_username')
-			);
-
-			Config::setPassword(
-				$this->config->get('ecomprocessing_direct_password')
-			);
-
-			Config::setToken(
-				$this->config->get('ecomprocessing_direct_token')
-			);
-
-			Config::setEnvironment(
-				$this->config->get('ecomprocessing_direct_sandbox') ? Environments::STAGING : Environments::PRODUCTION
-			);
-		}
-	}
-
-	/**
-	 * Check whether the selected transaction type is a 3d transaction
 	 *
-	 * @return bool
+	 * @throws InvalidArgument
 	 */
-	public function is3dTransaction(): bool
-	{
-		$types = array(
-			Types::AUTHORIZE_3D,
-			Types::SALE_3D,
-			Types::INIT_RECURRING_SALE_3D,
-		);
+	public function bootstrap(): void {
+		parent::bootstrap();
 
-		$transaction_type = $this->config->get(
-			$this->isRecurringOrder() ? 'ecomprocessing_direct_recurring_transaction_type' : 'ecomprocessing_direct_transaction_type'
-		);
+		$token = $this->config->get("{$this->module_name}_token");
 
-		return in_array($transaction_type, $types);
+		if (empty($token)) {
+			Config::setForceSmartRouting(true);
+
+			return;
+		}
+
+		Config::setToken($token);
 	}
 
 	/**
@@ -270,8 +238,7 @@ class EcomprocessingDirect extends BaseModel
 	 *
 	 * @return string
 	 */
-	public function genTransactionId($prefix = ''): string
-	{
+	public function genTransactionId($prefix = ''): string {
 		$hash = md5(microtime(true) . uniqid() . mt_rand(PHP_INT_SIZE, PHP_INT_MAX));
 
 		return (string)$prefix . substr($hash, -(strlen($hash) - strlen($prefix)));
@@ -282,8 +249,33 @@ class EcomprocessingDirect extends BaseModel
 	 *
 	 * @return string
 	 */
-	public function getUsage(): string
-	{
+	public function getUsage(): string {
 		return sprintf('%s direct transaction', $this->config->get('config_name'));
+	}
+
+	/**
+	 * Append 3DSv2 browser parameters to the Genesis Request
+	 *
+	 * @param $genesis
+	 * @param $data
+	 *
+	 * @return void
+	 */
+	protected function addThreedsBrowserParamsToRequest($genesis, $data): void {
+		$http_accept = $this->request->server['HTTP_ACCEPT'] ?? null;
+
+		/** @var Create $request */
+		$request = $genesis->request();
+		$request
+			->setThreedsV2ControlDeviceType(DeviceTypes::BROWSER)
+			->setThreedsV2ControlChallengeWindowSize(ChallengeWindowSizes::FULLSCREEN)
+			->setThreedsV2BrowserAcceptHeader($http_accept)
+			->setThreedsV2BrowserJavaEnabled($data['browser_data'][self::THREEDS_V2_JAVA_ENABLED])
+			->setThreedsV2BrowserLanguage($data['browser_data'][self::THREEDS_V2_BROWSER_LANGUAGE])
+			->setThreedsV2BrowserColorDepth($data['browser_data'][self::THREEDS_V2_COLOR_DEPTH])
+			->setThreedsV2BrowserScreenHeight($data['browser_data'][self::THREEDS_V2_SCREEN_HEIGHT])
+			->setThreedsV2BrowserScreenWidth($data['browser_data'][self::THREEDS_V2_SCREEN_WIDTH])
+			->setThreedsV2BrowserTimeZoneOffset($data['browser_data'][self::THREEDS_V2_BROWSER_TIMEZONE_ZONE_OFFSET])
+			->setThreedsV2BrowserUserAgent($data['browser_data'][self::THREEDS_V2_USER_AGENT]);
 	}
 }

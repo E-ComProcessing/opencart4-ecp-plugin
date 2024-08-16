@@ -19,40 +19,31 @@
 
 namespace Opencart\Admin\Model\Extension\Ecomprocessing\Payment;
 
-use Genesis\API\Constants\Endpoints;
-use Genesis\API\Constants\Environments;
-use Genesis\API\Constants\Transaction\Names;
-use Genesis\API\Constants\Transaction\Types;
+use Genesis\Api\Constants\Endpoints;
+use Genesis\Api\Constants\Environments;
+use Genesis\Api\Constants\Transaction\Names;
+use Genesis\Api\Constants\Transaction\Types;
 use Genesis\Config;
 use Genesis\Genesis;
+use Opencart\Admin\Model\Extension\Ecomprocessing\Payment\ecomprocessing\BaseModel;
 use Opencart\Extension\Ecomprocessing\System\DbHelper;
 use Opencart\Extension\Ecomprocessing\System\EcomprocessingHelper;
-use Opencart\System\Engine\Model;
 
 /**
  * Backend model for the "ecomprocessing Direct" module
  *
  * @package EcomprocessingDirect
  */
-class EcomprocessingDirect extends Model
+class EcomprocessingDirect extends BaseModel
 {
-	protected $module_name = "ecomprocessing_direct";
-
-	/**
-	 * Holds the current module version
-	 * Will be displayed on Admin Settings Form
-	 *
-	 * @var string
-	 */
-	protected $module_version = '1.1.3';
+	protected string $module_name = "ecomprocessing_direct";
 
 	/**
 	 * Perform installation logic
 	 *
 	 * @return void
 	 */
-	public function install(): void
-	{
+	public function install(): void {
 		$this->db->query("
 			CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "ecomprocessing_direct_transactions` (
 			  `unique_id` VARCHAR(255) NOT NULL,
@@ -95,8 +86,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return void
 	 */
-	public function uninstall(): void
-	{
+	public function uninstall(): void {
 		// Keep transaction data
 		//$this->db->query("DROP TABLE IF EXISTS `" . DB_PREFIX . "ecomprocessing_direct_transactions`;");
 
@@ -112,8 +102,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return mixed bool on fail, row on success
 	 */
-	public function getTransactionById($reference_id): mixed
-	{
+	public function getTransactionById($reference_id): mixed {
 		$query = $this->db->query("
 			SELECT * FROM `" . DB_PREFIX . "ecomprocessing_direct_transactions`
 			WHERE `unique_id` = '" . $this->db->escape($reference_id) . "' LIMIT 1
@@ -134,8 +123,7 @@ class EcomprocessingDirect extends Model
 	 * @param string $status
 	 * @return float
 	 */
-	public function getTransactionsSumAmount($order_id, $reference_id, $types, $status): float
-	{
+	public function getTransactionsSumAmount($order_id, $reference_id, $types, $status): float {
 		$transactions = $this->getTransactionsByTypeAndStatus($order_id, $reference_id, $types, $status);
 		$total_amount = 0;
 
@@ -160,8 +148,7 @@ class EcomprocessingDirect extends Model
 	 * @return array|false
 	 */
 
-	public function getTransactionsByTypeAndStatus($order_id, $reference_id, $transaction_types, $status): array|false
-	{
+	public function getTransactionsByTypeAndStatus($order_id, $reference_id, $transaction_types, $status): array|false {
 		$query = $this->db->query("
 			SELECT *
 			FROM `" . DB_PREFIX . "ecomprocessing_direct_transactions` AS t
@@ -185,8 +172,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return mixed bool on fail, rows on success
 	 */
-	public function getTransactionsByOrder($order_id): mixed
-	{
+	public function getTransactionsByOrder($order_id): mixed {
 		$query = $this->db->query("
 			SELECT * FROM `" . DB_PREFIX . "ecomprocessing_direct_transactions` 
 			WHERE `order_id` = '" . intval($order_id) . "'
@@ -209,8 +195,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return object|string
 	 */
-	public function capture($type, $reference_id, $amount, $currency, $usage): object|string
-	{
+	public function capture($type, $reference_id, $amount, $currency, $usage): object|string {
 		try {
 			$this->bootstrap();
 
@@ -224,7 +209,7 @@ class EcomprocessingDirect extends Model
 					$this->genTransactionId('ocart-')
 				)
 				->setRemoteIp(
-					$this->request->server['REMOTE_ADDR']
+					EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR'])
 				)
 				->setUsage($usage)
 				->setReferenceId($reference_id)
@@ -251,8 +236,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return object|string
 	 */
-	public function refund($type, $reference_id, $amount, $currency, $usage = ''): object|string
-	{
+	public function refund($type, $reference_id, $amount, $currency, $usage = ''): object|string {
 		try {
 			$this->bootstrap();
 
@@ -266,7 +250,7 @@ class EcomprocessingDirect extends Model
 					$this->genTransactionId('ocart-')
 				)
 				->setRemoteIp(
-					$this->request->server['REMOTE_ADDR']
+					EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR'])
 				)
 				->setUsage($usage)
 				->setReferenceId($reference_id)
@@ -291,8 +275,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return object|string
 	 */
-	public function void($reference_id, $usage = ''): object|string
-	{
+	public function void($reference_id, $usage = ''): object|string {
 		try {
 			$this->bootstrap();
 
@@ -304,7 +287,7 @@ class EcomprocessingDirect extends Model
 					$this->genTransactionId('ocart-')
 				)
 				->setRemoteIp(
-					$this->request->server['REMOTE_ADDR']
+					EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR'])
 				)
 				->setUsage($usage)
 				->setReferenceId($reference_id);
@@ -324,8 +307,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return array
 	 */
-	public function getTransactionTypes(): array
-	{
+	public function getTransactionTypes(): array {
 		return array(
 			Types::AUTHORIZE    => array(
 				'id'   => Types::AUTHORIZE,
@@ -363,8 +345,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @throws \Genesis\Exceptions\InvalidArgument
 	 */
-	public function getRecurringTransactionTypes(): array
-	{
+	public function getRecurringTransactionTypes(): array {
 		// TODO: Should we move out this to a trait or another class to avoid duplicate code
 		$data = array();
 
@@ -398,45 +379,10 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return string
 	 */
-	public function genTransactionId($prefix = ''): string
-	{
+	public function genTransactionId($prefix = ''): string {
 		$hash = md5(microtime(true) . uniqid() . mt_rand(PHP_INT_SIZE, PHP_INT_MAX));
 
 		return (string)$prefix . substr($hash, -(strlen($hash) - strlen($prefix)));
-	}
-
-	/**
-	 * Bootstrap Genesis Library
-	 *
-	 * @return void
-	 *
-	 * @throws \Genesis\Exceptions\InvalidArgument
-	 */
-	public function bootstrap(): void
-	{
-		// Look for, but DO NOT try to load via Auto-loader magic methods
-		if (class_exists('\Genesis\Genesis')) {
-
-			Config::setEndpoint(
-				Endpoints::ECOMPROCESSING
-			);
-
-			Config::setUsername(
-				$this->config->get('ecomprocessing_direct_username')
-			);
-
-			Config::setPassword(
-				$this->config->get('ecomprocessing_direct_password')
-			);
-
-			Config::setToken(
-				$this->config->get('ecomprocessing_direct_token')
-			);
-
-			Config::setEnvironment(
-				($this->config->get('ecomprocessing_direct_sandbox')) ? Environments::STAGING : Environments::PRODUCTION
-			);
-		}
 	}
 
 	/**
@@ -446,8 +392,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return void
 	 */
-	public function logEx(\Exception $exception): void
-	{
+	public function logEx(\Exception $exception): void {
 		$db_helper = new DbHelper($this->module_name, $this);
 		$db_helper->logEx($exception);
 	}
@@ -457,8 +402,7 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @return string
 	 */
-	public function getVersion(): string
-	{
+	public function getVersion(): string {
 		return $this->module_version;
 	}
 
@@ -471,9 +415,28 @@ class EcomprocessingDirect extends Model
 	 *
 	 * @throws \Exception
 	 */
-	public function populateTransaction($data): void
-	{
+	public function populateTransaction($data): void {
 		$db_helper = new DbHelper($this->module_name, $this);
 		$db_helper->populateTransaction($data);
+	}
+
+	/**
+	 * Bootstrap Genesis Library
+	 *
+	 * @return void
+	 *
+	 * @throws \Genesis\Exceptions\InvalidArgument
+	 */
+	protected function bootstrap(): void {
+		parent::bootstrap();
+
+		$token = $this->config->get("{$this->module_name}_token");
+		if (empty($token)) {
+			Config::setForceSmartRouting(true);
+
+			return;
+		}
+
+		Config::setToken($token);
 	}
 }

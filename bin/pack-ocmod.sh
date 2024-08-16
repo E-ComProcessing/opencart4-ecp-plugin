@@ -1,5 +1,12 @@
 #!/bin/bash
 
-[ -f ecomprocessing.ocmod.zip] && rm ecomprocessing.ocmod.zip
+# Package name
+package="ecomprocessing.ocmod"
 
-zip -r ecomprocessing.ocmod.zip admin catalog image system install.json
+# Remove old/existing package
+[ -f "${package}.zip" ] && rm "${package}.zip"
+
+# Create package
+zip -rq "${package}.zip" admin catalog image system install.json
+
+[ -f "${package}.zip" ] && echo "The installation package (${package}.zip) was packed!"

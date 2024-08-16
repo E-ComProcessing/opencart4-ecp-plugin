@@ -19,14 +19,14 @@
 
 namespace Opencart\Extension\Ecomprocessing\System;
 
-use Genesis\API\Constants\Banks;
-use Genesis\API\Constants\Transaction\Names;
-use Genesis\API\Constants\Transaction\Types;
-use Genesis\API\Constants\Transaction\Parameters\Mobile\ApplePay\PaymentTypes as ApplePayPaymentTypes;
-use Genesis\API\Constants\Transaction\Parameters\Mobile\GooglePay\PaymentTypes as GooglePayPaymentTypes;
-use Genesis\API\Constants\Transaction\Parameters\Wallets\PayPal\PaymentTypes as PayPalPaymentTypes;
-use Genesis\API\Request\Financial\Alternatives\Klarna\Item;
-use Genesis\API\Request\Financial\Alternatives\Klarna\Items;
+use Genesis\Api\Constants\Banks;
+use Genesis\Api\Constants\Transaction\Names;
+use Genesis\Api\Constants\Transaction\Types;
+use Genesis\Api\Constants\Transaction\Parameters\Mobile\ApplePay\PaymentTypes as ApplePayPaymentTypes;
+use Genesis\Api\Constants\Transaction\Parameters\Mobile\GooglePay\PaymentTypes as GooglePayPaymentTypes;
+use Genesis\Api\Constants\Transaction\Parameters\Wallets\PayPal\PaymentTypes as PayPalPaymentTypes;
+use Genesis\Api\Request\Financial\Alternatives\Klarna\Item;
+use Genesis\Api\Request\Financial\Alternatives\Klarna\Items;
 use Opencart\Catalog\Model\Extension\Ecomprocessing\Payment\Ecomprocessing\BaseModel;
 
 
@@ -39,7 +39,6 @@ class EcomprocessingHelper
 {
 	const CONTROLLER_ACTION_SEPARATOR = '.';
 
-	const PPRO_TRANSACTION_SUFFIX     = '_ppro';
 	const TRANSACTION_LANGUAGE_PREFIX = 'text_transaction_';
 
 	const GOOGLE_PAY_TRANSACTION_PREFIX     = Types::GOOGLE_PAY . '_';
@@ -63,8 +62,7 @@ class EcomprocessingHelper
 	 *
 	 * @return array
 	 */
-	public static function getRecurringTransactionTypes(): array
-	{
+	public static function getRecurringTransactionTypes(): array {
 		return array(
 			Types::INIT_RECURRING_SALE,
 			Types::INIT_RECURRING_SALE_3D
@@ -76,8 +74,7 @@ class EcomprocessingHelper
 	 *
 	 * @return array
 	 */
-	public static function getTransactionTypeNames(): array
-	{
+	public static function getTransactionTypeNames(): array {
 		$data = array();
 
 		foreach (Types::getWPFTransactionTypes() as $type) {
@@ -104,8 +101,7 @@ class EcomprocessingHelper
 	 *
 	 * @throws \Genesis\Exceptions\ErrorParameter
 	 */
-	public static function getKlarnaCustomParamItems($order): Items
-	{
+	public static function getKlarnaCustomParamItems($order): Items {
 		$tax_class_ids = self::getTaxClassIdFromProductInfo($order['additional']['product_info']);
 
 		$items = new Items($order['currency']);
@@ -160,11 +156,10 @@ class EcomprocessingHelper
 	 *
 	 * @return array
 	 */
-	public static function getTaxClassIdFromProductInfo($products): array
-	{
+	public static function getTaxClassIdFromProductInfo($products): array {
 		$class_ids = array();
 
-		foreach($products as $product) {
+		foreach ($products as $product) {
 			$class_ids[$product['product_id']] = $product['tax_class_id'];
 		}
 
@@ -178,11 +173,10 @@ class EcomprocessingHelper
 	 *
 	 * @return int
 	 */
-	public static function getShippingFromOrderTotals($order_totals): int
-	{
+	public static function getShippingFromOrderTotals($order_totals): int {
 		$shipping = 0;
 
-		foreach($order_totals as $item_total) {
+		foreach ($order_totals as $item_total) {
 			if ($item_total['code'] == 'shipping') {
 				$shipping += $item_total['value'];
 			}
@@ -198,11 +192,10 @@ class EcomprocessingHelper
 	 *
 	 * @return int
 	 */
-	public static function getTaxFromOrderTotals($order_totals): int
-	{
+	public static function getTaxFromOrderTotals($order_totals): int {
 		$tax = 0;
 
-		foreach($order_totals as $item_total) {
+		foreach ($order_totals as $item_total) {
 			if ($item_total['code'] == 'tax') {
 				$tax += $item_total['value'];
 			}
@@ -216,12 +209,13 @@ class EcomprocessingHelper
 	 *
 	 * @return array
 	 */
-	public static function getAvailableBankCodes(): array
-	{
+	public static function getAvailableBankCodes(): array {
 		return [
 			Banks::CPI => 'Interac Combined Pay-in',
 			Banks::BCT => 'Bancontact',
-			Banks::BLK => 'Blik One Click'
+			Banks::BLK => 'BLIK',
+			Banks::SE  => 'SPEI',
+			Banks::PID => 'LatiPay'
 		];
 	}
 
@@ -232,8 +226,7 @@ class EcomprocessingHelper
 	 *
 	 * @return bool
 	 */
-	public static function isSecureConnection($request): bool
-	{
+	public static function isSecureConnection($request): bool {
 		if (!empty($request->server['HTTPS']) && strtolower($request->server['HTTPS']) != 'off') {
 			return true;
 		}
@@ -247,5 +240,18 @@ class EcomprocessingHelper
 		}
 
 		return false;
+	}
+
+	/**
+	 * Return the first ip address from the list
+	 *
+	 * @param string $remote_address
+	 *
+	 * @return string
+	 */
+	public static function getFirstRemoteAddress($remote_address): string {
+		$ips = explode(",", $remote_address);
+
+		return trim($ips[0]);
 	}
 }

@@ -19,45 +19,38 @@
 
 namespace Opencart\Admin\Model\Extension\Ecomprocessing\Payment;
 
-use Genesis\API\Constants\Endpoints;
-use Genesis\API\Constants\Environments;
-use Genesis\API\Constants\Payment\Methods;
-use Genesis\API\Constants\Transaction\Names;
-use Genesis\API\Constants\Transaction\Types;
-use Genesis\API\Constants\Transaction\Parameters\Mobile\GooglePay\PaymentTypes as GooglePayPaymentTypes;
-use Genesis\API\Constants\Transaction\Parameters\Mobile\ApplePay\PaymentTypes as ApplePayPaymentTypes;
-use Genesis\API\Constants\Transaction\Parameters\Wallets\PayPal\PaymentTypes as PayPalPaymentTypes;
-use Genesis\API\Request\Financial\Alternatives\Klarna\Items as KlarnaItems;
+use Genesis\Api\Constants\Endpoints;
+use Genesis\Api\Constants\Environments;
+use Genesis\Api\Constants\Payment\Methods;
+use Genesis\Api\Constants\Transaction\Names;
+use Genesis\Api\Constants\Transaction\Types;
+use Genesis\Api\Constants\Transaction\Parameters\Mobile\GooglePay\PaymentTypes as GooglePayPaymentTypes;
+use Genesis\Api\Constants\Transaction\Parameters\Mobile\ApplePay\PaymentTypes as ApplePayPaymentTypes;
+use Genesis\Api\Constants\Transaction\Parameters\Wallets\PayPal\PaymentTypes as PayPalPaymentTypes;
+use Genesis\Api\Request\Financial\Alternatives\Klarna\Items as KlarnaItems;
 use Genesis\Config;
+use Genesis\Exceptions\InvalidArgument;
 use Genesis\Genesis;
+use Opencart\Admin\Model\Extension\Ecomprocessing\Payment\ecomprocessing\BaseModel;
 use Opencart\Extension\Ecomprocessing\System\DbHelper;
 use Opencart\Extension\Ecomprocessing\System\EcomprocessingHelper;
-use Opencart\System\Engine\Model;
 
 /**
  * Backend model for the "ecomprocessing Checkout" module
  *
  * @package EcomprocessingCheckout
+ * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  */
-class EcomprocessingCheckout extends Model
+class EcomprocessingCheckout extends BaseModel
 {
-	protected $module_name = 'ecomprocessing_checkout';
-
-	/**
-	 * Holds the current module version
-	 * Will be displayed on Admin Settings Form
-	 *
-	 * @var string
-	 */
-	protected $module_version = '1.1.3';
+	protected string $module_name = 'ecomprocessing_checkout';
 
 	/**
 	 * Perform installation logic
 	 *
 	 * @return void
 	 */
-	public function install(): void
-	{
+	public function install(): void {
 		$this->db->query("
 			CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "ecomprocessing_checkout_transactions` (
 			  `unique_id` VARCHAR(255) NOT NULL,
@@ -110,8 +103,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return void
 	 */
-	public function uninstall(): void
-	{
+	public function uninstall(): void {
 		// Keep transaction data
 		//$this->db->query("DROP TABLE IF EXISTS `" . DB_PREFIX . "ecomprocessing_checkout_transactions`;");
 
@@ -127,8 +119,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return mixed bool on fail, row on success
 	 */
-	public function getTransactionById($reference_id): mixed
-	{
+	public function getTransactionById($reference_id): mixed {
 		$query = $this->db->query("
 			SELECT * FROM `" . DB_PREFIX . "ecomprocessing_checkout_transactions`
 			WHERE `unique_id` = '" . $this->db->escape($reference_id) . "' LIMIT 1
@@ -151,8 +142,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return float
 	 */
-	public function getTransactionsSumAmount($order_id, $reference_id, $types, $status): float
-	{
+	public function getTransactionsSumAmount($order_id, $reference_id, $types, $status): float {
 		$transactions = $this->getTransactionsByTypeAndStatus($order_id, $reference_id, $types, $status);
 		$total_amount = 0;
 
@@ -176,8 +166,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return array|false
 	 */
-	public function getTransactionsByTypeAndStatus($order_id, $reference_id, $transaction_types, $status): array|false
-	{
+	public function getTransactionsByTypeAndStatus($order_id, $reference_id, $transaction_types, $status): array|false {
 		$query = $this->db->query("
 			SELECT *
 			FROM `" . DB_PREFIX . "ecomprocessing_checkout_transactions` AS t
@@ -201,8 +190,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return mixed bool on fail, rows on success
 	 */
-	public function getTransactionsByOrder($order_id): mixed
-	{
+	public function getTransactionsByOrder($order_id): mixed {
 		$query = $this->db->query("
 			SELECT * FROM `" . DB_PREFIX . "ecomprocessing_checkout_transactions`
 			WHERE `order_id` = '" . abs(intval($order_id)) . "'
@@ -228,8 +216,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return object|string
 	 */
-	public function capture($type, $reference_id, $amount, $currency, $usage, $order_id, $token = null): object|string
-	{
+	public function capture($type, $reference_id, $amount, $currency, $usage, $order_id, $token = null): object|string {
 		try {
 			$this->bootstrap($token);
 
@@ -243,7 +230,7 @@ class EcomprocessingCheckout extends Model
 					$this->genTransactionId('ocart-')
 				)
 				->setRemoteIp(
-					$this->request->server['REMOTE_ADDR']
+					EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR'])
 				)
 				->setUsage($usage)
 				->setReferenceId($reference_id)
@@ -277,8 +264,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return object|string
 	 */
-	public function refund($type, $reference_id, $amount, $currency, $usage = '', $token = null, $order_id = 0): object|string
-	{
+	public function refund($type, $reference_id, $amount, $currency, $usage = '', $token = null, $order_id = 0): object|string {
 		try {
 			$this->bootstrap($token);
 
@@ -292,7 +278,7 @@ class EcomprocessingCheckout extends Model
 					$this->genTransactionId('ocart-')
 				)
 				->setRemoteIp(
-					$this->request->server['REMOTE_ADDR']
+					EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR'])
 				)
 				->setUsage($usage)
 				->setReferenceId($reference_id)
@@ -322,8 +308,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return object|string
 	 */
-	public function void($reference_id, $usage = '', $token = null): object|string
-	{
+	public function void($reference_id, $usage = '', $token = null): object|string {
 		try {
 			$this->bootstrap($token);
 
@@ -335,7 +320,7 @@ class EcomprocessingCheckout extends Model
 					$this->genTransactionId('ocart-')
 				)
 				->setRemoteIp(
-					$this->request->server['REMOTE_ADDR']
+					EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR'])
 				)
 				->setUsage($usage)
 				->setReferenceId($reference_id);
@@ -355,8 +340,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return array
 	 */
-	public function getTransactionTypes(): array
-	{
+	public function getTransactionTypes(): array {
 		$data = array();
 
 		$this->bootstrap();
@@ -383,14 +367,6 @@ class EcomprocessingCheckout extends Model
 
 		// Exclude Transaction Types
 		$transaction_types = array_diff($transaction_types, $excluded_types);
-
-		// Add PPRO types
-		$ppro_types = array_map(
-			function ($type) {
-				return $type . EcomprocessingHelper::PPRO_TRANSACTION_SUFFIX;
-			},
-			Methods::getMethods()
-		);
 
 		// Add Google Payment types
 		$google_pay_types = array_map(
@@ -428,7 +404,6 @@ class EcomprocessingCheckout extends Model
 
 		$transaction_types = array_merge(
 			$transaction_types,
-			$ppro_types,
 			$google_pay_types,
 			$paypal_types,
 			$apple_pay_types
@@ -460,8 +435,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return array
 	 */
-	public function getBankCodes(): array
-	{
+	public function getBankCodes(): array {
 		$data = [];
 		$available_bank_codes = EcomprocessingHelper::getAvailableBankCodes();
 
@@ -480,8 +454,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return array
 	 */
-	public function getRecurringTransactionTypes(): array
-	{
+	public function getRecurringTransactionTypes(): array {
 		$data = [];
 
 		$this->bootstrap();
@@ -531,47 +504,10 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return string
 	 */
-	public function genTransactionId($prefix = ''): string
-	{
+	public function genTransactionId($prefix = ''): string {
 		$hash = md5(microtime(true) . uniqid() . mt_rand(PHP_INT_SIZE, PHP_INT_MAX));
 
 		return (string)$prefix . substr($hash, -(strlen($hash) - strlen($prefix)));
-	}
-
-	/**
-	 * Bootstrap Genesis Library
-	 *
-	 * @param string $token Terminal token
-	 *
-	 * @return void
-	 *
-	 * @throws \Genesis\Exceptions\InvalidArgument
-	 */
-	public function bootstrap($token = null): void
-	{
-		if (!class_exists('\Genesis\Genesis', false)) {
-			include DIR_STORAGE . 'vendor/genesisgateway/genesis_php/vendor/autoload.php';
-
-			Config::setEndpoint(
-				Endpoints::ECOMPROCESSING
-			);
-
-			Config::setUsername(
-				$this->config->get('ecomprocessing_checkout_username')
-			);
-
-			Config::setPassword(
-				$this->config->get('ecomprocessing_checkout_password')
-			);
-
-			Config::setEnvironment(
-				$this->config->get('ecomprocessing_checkout_sandbox') ? Environments::STAGING : Environments::PRODUCTION
-			);
-		}
-
-		if (isset($token)) {
-			Config::setToken((string)$token);
-		}
 	}
 
 	/**
@@ -581,8 +517,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return void
 	 */
-	public function logEx(\Exception $exception): void
-	{
+	public function logEx(\Exception $exception): void {
 		$db_helper = new DbHelper($this->module_name, $this);
 		$db_helper->logEx($exception);
 	}
@@ -592,8 +527,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @return string
 	 */
-	public function getVersion(): string
-	{
+	public function getVersion(): string {
 		return $this->module_version;
 	}
 
@@ -606,8 +540,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @throws \Exception
 	 */
-	public function populateTransaction($data): void
-	{
+	public function populateTransaction($data): void {
 		$db_helper = new DbHelper($this->module_name, $this);
 		$db_helper->populateTransaction($data);
 	}
@@ -620,8 +553,7 @@ class EcomprocessingCheckout extends Model
 	 *
 	 * @throws \Genesis\Exceptions\ErrorParameter
 	 */
-	protected function getKlarnaReferenceAttributes($currency, $order_id): KlarnaItems
-	{
+	protected function getKlarnaReferenceAttributes($currency, $order_id): KlarnaItems {
 		$this->load->model('sale/order');
 
 		$product_order_info = $this->model_sale_order->getOrderProducts($order_id);
@@ -647,5 +579,21 @@ class EcomprocessingCheckout extends Model
 				)
 			)
 		);
+	}
+
+	/**
+	 * Bootstrap Genesis Library
+	 *
+	 * @param string|null $token Terminal token
+	 *
+	 * @return void
+	 *
+	 * @throws InvalidArgument
+	 */
+	protected function bootstrap(?string $token = null): void {
+		parent::bootstrap();
+		if (isset($token)) {
+			Config::setToken((string)$token);
+		}
 	}
 }

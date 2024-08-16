@@ -19,9 +19,10 @@
 
 namespace Opencart\Catalog\Controller\Extension\Ecomprocessing\Payment;
 
-use Genesis\API\Notification;
+use Exception;
+use Genesis\Api\Notification;
 use Opencart\Extension\Ecomprocessing\System\Catalog\BaseController;
-use Genesis\API\Constants\Transaction\States;
+use Genesis\Api\Constants\Transaction\States;
 
 /**
  * Front-end controller for the "ecomprocessing Direct" module
@@ -43,8 +44,7 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @param $registry
 	 */
-	public function __construct($registry)
-	{
+	public function __construct($registry) {
 		parent::__construct($registry);
 	}
 
@@ -53,22 +53,29 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return mixed
 	 */
-	public function index(): mixed
-	{
+	public function index(): mixed {
 		$this->load->language('extension/ecomprocessing/payment/ecomprocessing_direct');
 		$this->load->model('extension/ecomprocessing/payment/ecomprocessing_direct');
-		$this->document->addStyle(HTTP_SERVER . '/extension/ecomprocessing/catalog/view/stylesheet/ecomprocessing/ecomprocessing.css');
 
 		if ($this->model_extension_ecomprocessing_payment_ecomprocessing_direct->isCartContentMixed()) {
 			$template = 'ecomprocessing_disabled';
-			$data = $this->prepareViewDataMixedCart();
+			$data     = $this->prepareViewDataMixedCart();
 
 		} else {
-			$template = 'ecomprocessing_direct';
-			$this->document->addScript(
-				HTTP_SERVER . '/extension/ecomprocessing/catalog/view/javascript/ecomprocessing/card.min.js'
-			);
-			$data = $this->prepareViewData();
+			$template          = 'ecomprocessing_direct';
+			$data              = $this->prepareViewData();
+			$data['styles'][]  = [
+				'href' =>
+					HTTP_SERVER . '/extension/ecomprocessing/catalog/view/stylesheet/ecomprocessing/ecomprocessing.css'
+			];
+			$data['scripts'][] = [
+				'href' =>
+					HTTP_SERVER . '/extension/ecomprocessing/catalog/view/javascript/ecomprocessing/card.min.js'
+			];
+			$data['scripts'][] = [
+				'href' =>
+					HTTP_SERVER . '/extension/ecomprocessing/catalog/view/javascript/ecomprocessing/emp-browser-parameters.js'
+			];
 		}
 
 		return $this->load->view('extension/ecomprocessing/payment/' . $template, $data);
@@ -79,8 +86,7 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return array
 	 */
-	public function prepareViewData(): array
-	{
+	public function prepareViewData(): array {
 		return array(
 			'text_credit_card' => $this->language->get('text_credit_card'),
 			'text_loading'     => $this->language->get('text_loading'),
@@ -91,29 +97,11 @@ class EcomprocessingDirect extends BaseController
 			'entry_cc_expiry'  => $this->language->get('entry_cc_expiry'),
 			'entry_cc_cvv'     => $this->language->get('entry_cc_cvv'),
 
-			'button_confirm' => $this->language->get('button_confirm'),
-			'button_target'  => $this->buildUrl(
+			'button_confirm'   => $this->language->get('button_confirm'),
+			'button_target'    => $this->buildUrl(
 				'extension/ecomprocessing/payment/ecomprocessing_direct',
 				'send'
 			),
-
-			'scripts'          => $this->document->getScripts(),
-			'styles'           => $this->document->getStyles(),
-		);
-	}
-
-	/**
-	 * Prepares data for the view when cart content is mixed
-	 *
-	 * @return array
-	 */
-	public function prepareViewDataMixedCart(): array
-	{
-		return array(
-			'text_loading'                    => $this->language->get('text_loading'),
-			'text_payment_mixed_cart_content' => $this->language->get('text_payment_mixed_cart_content'),
-			'button_shopping_cart'            => $this->language->get('button_shopping_cart'),
-			'button_target'                   => $this->buildUrl('checkout/cart')
 		);
 	}
 
@@ -122,171 +110,85 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return void
 	 */
-	public function send(): void
-	{
+	public function send(): void {
+		$this->load->model('account/order');
+		$this->load->model('account/customer');
 		$this->load->model('checkout/order');
 		$this->load->model('extension/ecomprocessing/payment/ecomprocessing_direct');
 
 		$this->load->language('extension/ecomprocessing/payment/ecomprocessing_direct');
+		$model = $this->model_extension_ecomprocessing_payment_ecomprocessing_direct;
 
-		if (array_key_exists('order_id', $this->session->data)) {
-			$order_info = $this->model_checkout_order->getOrder($this->session->data['order_id']);
+		if (!array_key_exists('order_id', $this->session->data)) {
+			$this->respondWithError('Incorrect call!');
 
-			try {
-				$data = array(
-					'transaction_id'     => $this->model_extension_ecomprocessing_payment_ecomprocessing_direct->genTransactionId(self::PLATFORM_TRANSACTION_PREFIX),
-
-					'remote_address'     => $this->request->server['REMOTE_ADDR'],
-
-					'usage'              => $this->model_extension_ecomprocessing_payment_ecomprocessing_direct->getUsage(),
-					'description'        => $this->model_extension_ecomprocessing_payment_ecomprocessing_direct->getOrderProducts(
-						$this->session->data['order_id']
-					),
-
-					'currency'           => $this->model_extension_ecomprocessing_payment_ecomprocessing_direct->getCurrencyCode(),
-					'amount'             => (float)$order_info['total'],
-
-					'customer_email'     => $order_info['email'],
-					'customer_phone'     => $order_info['telephone'],
-
-					'card_holder'        => $this->inputFilter(
-						$this->request->post['ecomprocessing_direct-cc-holder'],
-						'name'
-					),
-					'card_number'        => $this->inputFilter(
-						$this->request->post['ecomprocessing_direct-cc-number'],
-						'number'
-					),
-					'cvv'                => $this->inputFilter(
-						$this->request->post['ecomprocessing_direct-cc-cvv'],
-						'cvv'
-					),
-					'expiration_month'   => $this->inputFilter(
-						$this->request->post['ecomprocessing_direct-cc-expiration'],
-						'month'
-					),
-					'expiration_year'    => $this->inputFilter(
-						$this->request->post['ecomprocessing_direct-cc-expiration'],
-						'year'
-					),
-
-					'notification_url'   => $this->buildUrl('extension/ecomprocessing/payment/ecomprocessing_direct/callback'),
-					'return_success_url' => $this->buildUrl('extension/ecomprocessing/payment/ecomprocessing_direct/success'),
-					'return_failure_url' => $this->buildUrl('extension/ecomprocessing/payment/ecomprocessing_direct/failure')
-				);
-
-				$this->populateAddresses($order_info, $data);
-
-				$transaction = $this->model_extension_ecomprocessing_payment_ecomprocessing_direct->sendTransaction($data);
-
-				if (isset($transaction->unique_id)) {
-					$timestamp = ($transaction->timestamp instanceof \DateTime) ? $transaction->timestamp->format('c') : $transaction->timestamp;
-
-					$data = array(
-						'reference_id'      => '0',
-						'order_id'          => $order_info['order_id'],
-						'unique_id'         => $transaction->unique_id,
-						'type'              => $transaction->transaction_type,
-						'status'            => $transaction->status,
-						'message'           => $transaction->message,
-						'technical_message' => $transaction->technical_message,
-						'amount'            => $transaction->amount,
-						'currency'          => $transaction->currency,
-						'timestamp'         => $timestamp,
-					);
-
-					$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->populateTransaction($data);
-
-					$redirect_url = $this->buildUrl('checkout/success');
-
-					switch ($transaction->status) {
-						case States::PENDING_ASYNC:
-							$this->model_checkout_order->addHistory(
-								$this->session->data['order_id'],
-								$this->config->get('ecomprocessing_direct_async_order_status_id'),
-								$this->language->get('text_payment_status_init_async'),
-								true
-							);
-
-							if (isset($transaction->threeds_method_continue_url)) {
-								throw new \Exception(
-									$this->language->get('text_payment_3ds_v2_error')
-								);
-							}
-
-							if (isset($transaction->redirect_url)) {
-								$redirect_url = $transaction->redirect_url;
-							}
-
-							break;
-						case States::APPROVED:
-							$this->model_checkout_order->addHistory(
-								$this->session->data['order_id'],
-								$this->config->get('ecomprocessing_direct_order_status_id'),
-								$this->language->get('text_payment_status_successful'),
-								false
-							);
-
-							break;
-						case States::DECLINED:
-						case States::ERROR:
-							$this->model_checkout_order->addHistory(
-								$this->session->data['order_id'],
-								$this->config->get('ecomprocessing_direct_order_failure_status_id'),
-								$this->language->get('text_payment_status_unsuccessful'),
-								true
-							);
-
-							throw new \Exception(
-								$transaction->message
-							);
-
-							break;
-					}
-
-					if ($this->model_extension_ecomprocessing_payment_ecomprocessing_direct->isRecurringOrder()) {
-						$this->addOrderRecurring($transaction->unique_id);
-						$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->populateRecurringTransaction($data);
-						$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->updateOrderRecurring($data);
-					}
-
-					$json = array(
-						'redirect' => $redirect_url
-					);
-				} else {
-					$json = array(
-						'error' => $this->language->get('text_payment_system_error')
-					);
-				}
-			} catch (\Exception $exception) {
-				$json = array(
-					'error' => ($exception->getMessage()) ?: $this->language->get('text_payment_system_error')
-				);
-
-				$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->logEx($exception);
-			}
-		} else {
-			$exception = new \Exception('Incorrect call!');
-			$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->logEx($exception);
-			$json = array(
-				'error' => $exception->getMessage()
-			);
+			return;
 		}
 
-		$this->response->addHeader('Content-Type: application/json');
+		try {
+			$order_info         = $this->model_checkout_order->getOrder($this->session->data['order_id']);
+			$product_order_info = $model->getDbOrderProducts($this->session->data['order_id']);
+			$product_info       = $model->getProductsInfo(
+				array_map(
+					function ($value) {
+						return $value['product_id'];
+					},
+					$product_order_info
+				)
+			);
 
-		$this->response->setOutput(
-			json_encode($json)
-		);
+			$data  = $this->populateTreedsParams($this, $product_info, $order_info);
+			$data += $this->populateBrowserParams();
+			$data += $this->populateCommonData($model, $order_info);
+			$data += $this->populateCreditCardData();
+			$data += $this->buildActionUrls($this->module_name);
+			$this->populateAddresses($order_info, $data);
+
+			$transaction_response = $model->sendTransaction($data);
+
+            if (!$transaction_response->isSuccessful()) {
+                throw new Exception($transaction_response->getErrorDescription());
+            }
+
+            $transaction = $transaction_response->getResponseObject();
+			if (isset($transaction->unique_id)) {
+				$data = $this->populateDataUniqIdTrx($transaction, $order_info);
+
+				$model->populateTransaction($data);
+
+				$redirect_url = $this->buildUrl('checkout/success');
+				$this->processTransactionStatus($transaction, $redirect_url);
+
+				if ($model->isRecurringOrder()) {
+					$this->addOrderRecurring($transaction->unique_id, $model);
+					$model->populateRecurringTransaction($data);
+					$model->updateOrderRecurring($data);
+				}
+
+				$json = array(
+					'redirect' => $redirect_url
+				);
+			} else {
+				$json = array(
+					'error' => $this->language->get('text_payment_system_error')
+				);
+			}
+
+			$this->response->addHeader('Content-Type: application/json');
+			$this->response->setOutput(json_encode($json));
+		} catch (Exception $exception) {
+			$this->respondWithError(($exception->getMessage()) ?: $this->language->get('text_payment_system_error'));
+			$model->logEx($exception);
+		}
 	}
 
 	/**
 	 * Process Gateway Notification
 	 *
 	 * @return void
+	 * @SuppressWarnings(PHPMD.CyclomaticComplexity)
 	 */
-	public function callback(): void
-	{
+	public function callback(): void {
 		$this->load->model('checkout/order');
 		$this->load->model('extension/ecomprocessing/payment/ecomprocessing_direct');
 
@@ -358,7 +260,7 @@ class EcomprocessingDirect extends BaseController
 					}
 				}
 			}
-		} catch (\Exception $exception) {
+		} catch (Exception $exception) {
 			$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->logEx($exception);
 		}
 	}
@@ -368,8 +270,7 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return void
 	 */
-	public function success(): void
-	{
+	public function success(): void {
 		$this->response->redirect($this->buildUrl('checkout/success'));
 	}
 
@@ -378,8 +279,7 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return void
 	 */
-	public function failure(): void
-	{
+	public function failure(): void {
 		$this->load->language('extension/ecomprocessing/payment/ecomprocessing_direct');
 
 		$this->session->data['error'] = $this->language->get('text_payment_failure');
@@ -395,12 +295,10 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return mixed|string
 	 */
-	protected function inputFilter($input, $type): mixed
-	{
+	protected function inputFilter($input, $type): mixed {
 		switch ($type) {
 			case 'number':
 				return str_replace(' ', '', $input);
-				break;
 			case 'cvv':
 				return strval($input);
 			case 'year':
@@ -437,8 +335,7 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return void
 	 */
-	protected function isUserLoggedIn(): void
-	{
+	protected function isUserLoggedIn(): void {
 		$is_callback = strpos((string)$this->request->get['route'], 'callback') !== false;
 
 		if (!$this->customer->isLogged() && !$is_callback) {
@@ -451,30 +348,10 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return string
 	 */
-	protected function getLegalText(): string
-	{
+	protected function getLegalText(): string {
 		$store_name = $this->config->get('config_name');
 
 		return sprintf('&copy; %s E-Comprocessing Ltd.<br/><br/>%s', date('Y'), $store_name);
-	}
-
-	/**
-	 * Adds recurring order
-	 *
-	 * @param string $payment_reference
-	 *
-	 * @return void
-	 */
-	public function addOrderRecurring($payment_reference): void
-	{
-		$recurring_products = $this->cart->getRecurringProducts();
-		if (!empty($recurring_products)) {
-			$this->load->model('extension/payment/ecomprocessing_direct');
-			$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->addOrderRecurring(
-				$recurring_products,
-				$payment_reference
-			);
-		}
 	}
 
 	/**
@@ -482,9 +359,112 @@ class EcomprocessingDirect extends BaseController
 	 *
 	 * @return void
 	 */
-	public function cron(): void
-	{
+	public function cron(): void {
 		$this->load->model('extension/payment/ecomprocessing_direct');
 		$this->model_extension_ecomprocessing_payment_ecomprocessing_direct->processRecurringOrders();
+	}
+
+	/**
+	 * Return browser parameters to add to the order data
+	 *
+	 * @return array[]
+	 */
+	private function populateBrowserParams(): array {
+		return [
+			'browser_data' => [
+				'java_enabled'                 => $this->request->post['ecomprocessing_direct-java_enabled'],
+				'color_depth'                  => $this->request->post['ecomprocessing_direct-color_depth'],
+				'browser_language'             => $this->request->post['ecomprocessing_direct-browser_language'],
+				'screen_height'                => $this->request->post['ecomprocessing_direct-screen_height'],
+				'screen_width'                 => $this->request->post['ecomprocessing_direct-screen_width'],
+				'user_agent'                   => $this->request->post['ecomprocessing_direct-user_agent'],
+				'browser_timezone_zone_offset' => $this->request->post['ecomprocessing_direct-browser_timezone_zone_offset'],
+			]
+		];
+	}
+
+	/**
+	 * Return Credit Card data from $_POST
+	 *
+	 * @return array
+	 */
+	private function populateCreditCardData() {
+		return [
+			'card_holder'        => $this->inputFilter(
+				$this->request->post['ecomprocessing_direct-cc-holder'],
+				'name'
+			),
+			'card_number'        => $this->inputFilter(
+				$this->request->post['ecomprocessing_direct-cc-number'],
+				'number'
+			),
+			'cvv'                => $this->inputFilter(
+				$this->request->post['ecomprocessing_direct-cc-cvv'],
+				'cvv'
+			),
+			'expiration_month'   => $this->inputFilter(
+				$this->request->post['ecomprocessing_direct-cc-expiration'],
+				'month'
+			),
+			'expiration_year'    => $this->inputFilter(
+				$this->request->post['ecomprocessing_direct-cc-expiration'],
+				'year'
+			),
+		];
+	}
+
+	/**
+	 * Processes transaction according the status
+	 *
+	 * @param $transaction
+	 * @param $redirect_url
+	 *
+	 * @return void
+	 *
+	 * @throws Exception
+	 */
+	private function processTransactionStatus($transaction, &$redirect_url) {
+		switch ($transaction->status) {
+			case States::PENDING_ASYNC:
+				$this->model_checkout_order->addHistory(
+					$this->session->data['order_id'],
+					$this->config->get('ecomprocessing_direct_async_order_status_id'),
+					$this->language->get('text_payment_status_init_async'),
+					true
+				);
+
+				if (isset($transaction->threeds_method_continue_url)) {
+					throw new Exception(
+						$this->language->get('text_payment_3ds_v2_error')
+					);
+				}
+
+				if (isset($transaction->redirect_url)) {
+					$redirect_url = $transaction->redirect_url;
+				}
+
+				break;
+			case States::APPROVED:
+				$this->model_checkout_order->addHistory(
+					$this->session->data['order_id'],
+					$this->config->get('ecomprocessing_direct_order_status_id'),
+					$this->language->get('text_payment_status_successful'),
+					false
+				);
+
+				break;
+			case States::DECLINED:
+			case States::ERROR:
+				$this->model_checkout_order->addHistory(
+					$this->session->data['order_id'],
+					$this->config->get('ecomprocessing_direct_order_failure_status_id'),
+					$this->language->get('text_payment_status_unsuccessful'),
+					true
+				);
+
+				throw new Exception(
+					$transaction->message
+				);
+		}
 	}
 }

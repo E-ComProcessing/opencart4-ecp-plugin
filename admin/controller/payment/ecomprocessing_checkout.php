@@ -40,8 +40,7 @@ class EcomprocessingCheckout extends BaseController
 	 *
 	 * @return bool
 	 */
-	protected function isModuleRequiresSsl(): bool
-	{
+	protected function isModuleRequiresSsl(): bool {
 		return false;
 	}
 }

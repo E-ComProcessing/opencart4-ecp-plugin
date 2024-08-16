@@ -23,15 +23,20 @@ if (!class_exists('Genesis\Genesis', false)) {
 	require DIR_STORAGE . 'vendor/genesisgateway/genesis_php/vendor/autoload.php';
 }
 
+use DateTime;
+use Genesis\Api\Constants\Endpoints;
+use Genesis\Api\Constants\Environments;
+use Genesis\Api\Request\Wpf\Create;
 use Genesis\Config;
-use Genesis\Exceptions\ErrorAPI;
+use Genesis\Exceptions\InvalidArgument;
 use Genesis\Genesis;
-use Genesis\API\Constants\Transaction\Parameters\Mobile\ApplePay\PaymentTypes as ApplePayPaymentTypes;
-use Genesis\API\Constants\Transaction\Parameters\Mobile\GooglePay\PaymentTypes as GooglePayPaymentTypes;
-use Genesis\API\Constants\Transaction\Parameters\Wallets\PayPal\PaymentTypes as PayPalPaymentTypes;
-use Genesis\API\Constants\Transaction\States;
-use Genesis\API\Constants\Transaction\Types;
+use Genesis\Api\Constants\Transaction\Parameters\Mobile\ApplePay\PaymentTypes as ApplePayPaymentTypes;
+use Genesis\Api\Constants\Transaction\Parameters\Mobile\GooglePay\PaymentTypes as GooglePayPaymentTypes;
+use Genesis\Api\Constants\Transaction\Parameters\Wallets\PayPal\PaymentTypes as PayPalPaymentTypes;
+use Genesis\Api\Constants\Transaction\States;
+use Genesis\Api\Constants\Transaction\Types;
 use Opencart\Extension\Ecomprocessing\System\DbHelper;
+use Opencart\Extension\Ecomprocessing\System\EcomprocessingHelper;
 use Opencart\System\Engine\Model;
 
 /**
@@ -40,12 +45,13 @@ use Opencart\System\Engine\Model;
  * Class BaseModel
  *
  * @package Opencart\Catalog\Model\Extension\Ecomprocessing\Payment\Ecomprocessing
+ *
+ * @SuppressWarnings(PHPMD.ExcessiveClassLength)
+ * @SuppressWarnings(PHPMD.ExcessiveClassComplexity)
+ * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  */
 abstract class BaseModel extends Model
 {
-
-	const PPRO_TRANSACTION_SUFFIX     = '_ppro';
-
 	const GOOGLE_PAY_TRANSACTION_PREFIX     = Types::GOOGLE_PAY . '_';
 	const GOOGLE_PAY_PAYMENT_TYPE_AUTHORIZE = GooglePayPaymentTypes::AUTHORIZE;
 	const GOOGLE_PAY_PAYMENT_TYPE_SALE      = GooglePayPaymentTypes::SALE;
@@ -115,6 +121,14 @@ abstract class BaseModel extends Model
 	const OC_TAX_CLASS_PHYSICAL_PRODUCT = 9;
 	const OC_TAX_CLASS_VIRTUAL_PRODUCT  = 10;
 
+	const THREEDS_V2_JAVA_ENABLED                 = 'java_enabled';
+	const THREEDS_V2_COLOR_DEPTH                  = 'color_depth';
+	const THREEDS_V2_BROWSER_LANGUAGE             = 'browser_language';
+	const THREEDS_V2_SCREEN_HEIGHT                = 'screen_height';
+	const THREEDS_V2_SCREEN_WIDTH                 = 'screen_width';
+	const THREEDS_V2_USER_AGENT                   = 'user_agent';
+	const THREEDS_V2_BROWSER_TIMEZONE_ZONE_OFFSET = 'browser_timezone_zone_offset';
+
 	/**
 	 * Module Name
 	 *
@@ -141,8 +155,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function recurringPayments(): bool
-	{
+	public function recurringPayments(): bool {
 		return ($this->config->get($this->module_name . '_supports_recurring') == '1')
 			&& (!empty($this->config->get($this->module_name . '_recurring_transaction_type')));
 	}
@@ -154,8 +167,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function isCartContentMixed(): bool
-	{
+	public function isCartContentMixed(): bool {
 		return $this->cart->hasSubscription() && (count($this->cart->getProducts()) > 1);
 	}
 
@@ -164,8 +176,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function isRecurringOrder(): bool
-	{
+	public function isRecurringOrder(): bool {
 		return $this->recurringPayments() && !empty($this->cart->getRecurringProducts());
 	}
 
@@ -173,8 +184,7 @@ abstract class BaseModel extends Model
 	 * Get current Currency Code
 	 * @return string
 	 */
-	public function getCurrencyCode(): string
-	{
+	public function getCurrencyCode(): string {
 		return $this->session->data['currency'];
 	}
 
@@ -185,8 +195,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return void
 	 */
-	public function addOrderRecurring($recurring_products, $payment_reference): void
-	{
+	public function addOrderRecurring($recurring_products, $payment_reference): void {
 		$this->load->model('checkout/recurring');
 		$this->load->language('extension/ecomprocessing/payment/' . $this->module_name);
 
@@ -271,8 +280,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function updateOrderRecurring($data, $payment_reference = null): bool
-	{
+	public function updateOrderRecurring($data, $payment_reference = null): bool {
 		switch ($data['status']) {
 			case States::APPROVED:
 				$recurring_status = self::OC_ORD_REC_STATUS_ACTIVE;
@@ -306,8 +314,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function cancelOrderRecurring($data): bool
-	{
+	public function cancelOrderRecurring($data): bool {
 		$recurring_status = 3; //Cancelled
 
 		$order_recurring_id = $this->getOrderRecurringId($data['order_id']);
@@ -324,8 +331,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return string
 	 */
-	public function getOrderRecurringId($order_id): string
-	{
+	public function getOrderRecurringId($order_id): string {
 		$query = $this->db->query("SELECT subscription_id FROM `" . DB_PREFIX . "subscription` WHERE order_id = '" . (int)$order_id . "'");
 
 		return $query->row['order_recurring_id'];
@@ -338,8 +344,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function populateRecurringTransaction($data): bool
-	{
+	public function populateRecurringTransaction($data): bool {
 		$ord_rec_transaction_id = null;
 
 		switch ($data['status']) {
@@ -386,8 +391,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function addRecurringTransaction($data, $oc_txn_type): bool
-	{
+	public function addRecurringTransaction($data, $oc_txn_type): bool {
 		$result = false;
 
 		if (!array_key_exists('order_recurring_id', $data)) {
@@ -408,8 +412,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function updateRecurringTransaction($data, $oc_txn_type): bool
-	{
+	public function updateRecurringTransaction($data, $oc_txn_type): bool {
 		$result = $this->db->query("UPDATE `" . DB_PREFIX . "subscription_transaction` SET `type` = '" . $oc_txn_type . "' WHERE `reference` = '" . $data['unique_id'] . "'");
 
 		return $result;
@@ -426,8 +429,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return void
 	 */
-	public function processRecurringOrders(): void
-	{
+	public function processRecurringOrders(): void {
 		if ($this->isCronCallAllowed()) {
 			$this->cronLogStartTime();
 			$this->cronLogDeleteOldRecords();
@@ -468,8 +470,7 @@ abstract class BaseModel extends Model
 	 * @throws \Genesis\Exceptions\InvalidArgument
 	 * @throws \Genesis\Exceptions\InvalidMethod
 	 */
-	public function createGenesisRequest($transaction_type): Genesis
-	{
+	public function createGenesisRequest($transaction_type): Genesis {
 		return new Genesis(
 			Types::getFinancialRequestClassForTrxType($transaction_type)
 		);
@@ -482,8 +483,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function isInitialRecurringTransaction($transaction_type): bool
-	{
+	public function isInitialRecurringTransaction($transaction_type): bool {
 		return in_array($transaction_type, array(
 			Types::INIT_RECURRING_SALE,
 			Types::INIT_RECURRING_SALE_3D
@@ -495,8 +495,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function cronLogStartTime(): bool
-	{
+	public function cronLogStartTime(): bool {
 		$this->log_start_timestamp = microtime(true);
 		$result = $this->db->query("INSERT `" . DB_PREFIX . $this->module_name . "_cronlog` SET `pid` = " . getmypid() . ", `start_time` = NOW()");
 		if ($result) {
@@ -511,8 +510,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function cronLogRunTime(): bool
-	{
+	public function cronLogRunTime(): bool {
 		$run_time = sprintf('%0.3f', microtime(true) - $this->log_start_timestamp);
 
 		return $this->db->query("UPDATE `" . DB_PREFIX . $this->module_name . "_cronlog` SET `run_time` = '"  . $run_time . "' WHERE `log_entry_id`=" . $this->log_entry_id);
@@ -523,8 +521,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function isCronTimeLimitReached(): bool
-	{
+	public function isCronTimeLimitReached(): bool {
 		return (microtime(true) - $this->log_start_timestamp) > $this->config->get($this->module_name . '_cron_time_limit');
 	}
 
@@ -536,8 +533,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function cronAddTransaction($ord_rec_transaction_id, $order_id): bool
-	{
+	public function cronAddTransaction($ord_rec_transaction_id, $order_id): bool {
 		$result = null;
 
 		if ($this->log_entry_id !== null) {
@@ -552,8 +548,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	public function cronLogDeleteOldRecords(): bool
-	{
+	public function cronLogDeleteOldRecords(): bool {
 		$last_cron_log_id = (string)$this->getLastCronLogId();
 
 		return $this->db->query(
@@ -580,8 +575,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @throws \Exception
 	 */
-	public function populateTransaction($data): void
-	{
+	public function populateTransaction($data): void {
 		$db_helper = new DbHelper($this->module_name, $this);
 		$db_helper->populateTransaction($data);
 	}
@@ -593,32 +587,9 @@ abstract class BaseModel extends Model
 	 *
 	 * @return void
 	 */
-	public function logEx(\Exception $exception): void
-	{
+	public function logEx(\Exception $exception): void {
 		$db_helper = new DbHelper($this->module_name, $this);
 		$db_helper->logEx($exception);
-	}
-
-	/**
-	 * Get the current front-end language
-	 *
-	 * @return string
-	 */
-	public function getLanguage(): string
-	{
-		$language = isset($this->session->data['language']) ? $this->session->data['language'] : $this->config->get('config_language');
-
-		$language_code = substr($language, 0, 2);
-
-		$this->bootstrap();
-
-		$is_available = @constant('\Genesis\API\Constants\i18n::' . strtoupper($language_code));
-
-		if ($is_available) {
-			return strtolower($language_code);
-		} else {
-			return 'en';
-		}
 	}
 
 	/**
@@ -629,8 +600,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return string
 	 */
-	public function getOrderProducts($order_id): string
-	{
+	public function getOrderProducts($order_id): string {
 		$order_product_query = $this->db->query("SELECT * FROM " . DB_PREFIX . "order_product WHERE order_id = '" . abs((int)$order_id) . "'");
 
 		$description = '';
@@ -643,13 +613,45 @@ abstract class BaseModel extends Model
 	}
 
 	/**
+	 * Get the Order Products stored in the Database
+	 *
+	 * @param $order_id
+	 *
+	 * @return mixed
+	 */
+	public function getDbOrderProducts($order_id): mixed {
+		$query = $this->db->query("SELECT * FROM " . DB_PREFIX . "order_product	WHERE order_id = '" . (int)$order_id . "'");
+
+		return $query->rows;
+	}
+
+	/**
+	 * Get Products Information
+	 *
+	 * @param array $products
+	 *
+	 * @return mixed
+	 */
+	public function getProductsInfo($products = array()): mixed {
+		$ids = array();
+		foreach ($products as $product) {
+			array_push($ids, abs((int)$product));
+		}
+
+		$products_resource = $this->db->query("SELECT *	FROM " . DB_PREFIX . "product WHERE product_id IN (" . implode(', ', $ids) . ")");
+
+		return $products_resource->rows;
+	}
+
+	/**
 	 * Determines whether the call to the cron is allowed based on IP address from which the cron is called
 	 *
 	 * @return bool
 	 */
-	protected function isCronCallAllowed(): bool
-	{
-		return $this->request->server['REMOTE_ADDR'] == trim($this->config->get("{$this->module_name}_cron_allowed_ip"));
+	protected function isCronCallAllowed(): bool {
+		$remote_address = EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR']);
+
+		return $remote_address == trim($this->config->get("{$this->module_name}_cron_allowed_ip"));
 	}
 
 	/**
@@ -658,9 +660,10 @@ abstract class BaseModel extends Model
 	 * @param array $data
 	 *
 	 * @return void
+	 *
+	 * @throws \Exception
 	 */
-	protected function processRecurringOrder($data): void
-	{
+	protected function processRecurringOrder($data): void {
 		$recurring = array(
 			'trial'           => $data['trial'],
 			'trial_cycle'     => $data['trial_cycle'],
@@ -671,10 +674,10 @@ abstract class BaseModel extends Model
 			'duration'        => $data['recurring_duration']
 		);
 
-		$order_recurring_start = new \DateTime(substr($data['date_added'], 0, 10)); //oc_order_recurring.date_added
+		$order_recurring_start = new DateTime(substr($data['date_added'], 0, 10)); //oc_order_recurring.date_added
 		$trial_end = clone $order_recurring_start;
 
-		$now = new \DateTime(date('Y-m-d'));
+		$now = new DateTime(date('Y-m-d'));
 
 		$is_pay_day = false;
 
@@ -704,7 +707,7 @@ abstract class BaseModel extends Model
 					$recurring['cycle'] * $recurring['duration']
 				);
 			} else {
-				$recurring_end = new \DateTime('2999-01-01');
+				$recurring_end = new DateTime('2999-01-01');
 			}
 			if ($now < $recurring_end) {
 				$is_pay_day = $this->isPayDay(
@@ -731,8 +734,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return float
 	 */
-	protected function calculateRebillingAmount($order_id, $amount): float
-	{
+	protected function calculateRebillingAmount($order_id, $amount): float {
 		$result = null;
 
 		$query = $this->db->query(
@@ -762,8 +764,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return void
 	*/
-	protected function recurringSale($rec_data): void
-	{
+	protected function recurringSale($rec_data): void {
 		$this->load->model('checkout/order');
 
 		$this->load->language('extension/ecomprocessing/payment/' . $this->module_name);
@@ -780,7 +781,7 @@ abstract class BaseModel extends Model
 					'transaction type' => Types::RECURRING_SALE,
 					'transaction_id'   => $this->genTransactionId(),
 					'usage'            => $this->getUsage(),
-					'remote_address'   => $this->request->server['REMOTE_ADDR'],
+					'remote_address'   => EcomprocessingHelper::getFirstRemoteAddress($this->request->server['REMOTE_ADDR']),
 					'reference_id'     => $rec_data['reference'],
 					'amount'           => $rec_data['amount'],
 					'currency'         => $rec_data['currency_code']
@@ -789,7 +790,7 @@ abstract class BaseModel extends Model
 				$response = $this->sendRecurringSale($data);
 
 				if ($response != false) {
-					$timestamp = ($response->timestamp instanceof \DateTime) ? $response->timestamp->format('c') : $response->timestamp;
+					$timestamp = ($response->timestamp instanceof DateTime) ? $response->timestamp->format('c') : $response->timestamp;
 
 					$data = array(
 						'order_id'          => $transaction['order_id'],
@@ -827,8 +828,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @throws /Exception
 	 */
-	protected function sendRecurringSale($data): mixed
-	{
+	protected function sendRecurringSale($data): mixed {
 		try {
 			$this->bootstrap();
 
@@ -849,8 +849,6 @@ abstract class BaseModel extends Model
 			$genesis->execute();
 
 			return $genesis->response()->getResponseObject();
-		} catch (ErrorAPI $api) {
-			throw $api;
 		} catch (\Exception $exception) {
 			$this->logEx($exception);
 
@@ -862,8 +860,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return int
 	 */
-	protected function getLastCronLogId(): int
-	{
+	protected function getLastCronLogId(): int {
 		$query = $this->db->query('SELECT `log_entry_id` FROM `' . DB_PREFIX . $this->module_name . '_cronlog` ORDER BY `log_entry_id` DESC LIMIT 1');
 
 		if ($query->num_rows == 1) {
@@ -882,8 +879,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return bool
 	 */
-	protected function checkGeoZoneAvailability($address)
-	{
+	protected function checkGeoZoneAvailability($address) {
 		$status = false;
 		$query  = $this->db->query("
 				SELECT * 
@@ -904,12 +900,106 @@ abstract class BaseModel extends Model
 	}
 
 	/**
+	 * Append 3DSv2 parameters to the Genesis Request
+	 *
+	 * @param $genesis
+	 * @param $data
+	 *
+	 * @throws InvalidArgument
+	 *
+	 * @return void
+	 */
+	protected function addThreedsParamsToRequest($genesis, $data): void {
+		/** @var Create $request */
+		$request = $genesis->request();
+		$request->setThreedsV2ControlChallengeIndicator($data['threeds_challenge_indicator'])
+			->setThreedsV2PurchaseCategory($data['threeds_purchase_category'])
+			->setThreedsV2MerchantRiskDeliveryTimeframe($data['threeds_delivery_timeframe'])
+			->setThreedsV2MerchantRiskShippingIndicator($data['threeds_shipping_indicator'])
+			->setThreedsV2MerchantRiskReorderItemsIndicator($data['threeds_reorder_items_indicator'])
+			->setThreedsV2CardHolderAccountRegistrationDate($data['threeds_registration_date'])
+			->setThreedsV2CardHolderAccountRegistrationIndicator($data['threeds_registration_indicator'])
+		;
+		if (!$data['is_guest']) {
+			$request->setThreedsV2CardHolderAccountCreationDate($data['threeds_creation_date'])
+				->setThreedsV2CardHolderAccountShippingAddressDateFirstUsed($data['threads_shipping_address_date_first_used'])
+				->setThreedsV2CardHolderAccountShippingAddressUsageIndicator($data['threeds_shipping_address_usage_indicator'])
+				->setThreedsV2CardHolderAccountTransactionsActivityLast24Hours($data['transactions_activity_last_24_hours'])
+				->setThreedsV2CardHolderAccountTransactionsActivityPreviousYear($data['transactions_activity_previous_year'])
+				->setThreedsV2CardHolderAccountPurchasesCountLast6Months($data['purchases_count_last_6_months'])
+			;
+		}
+
+		$amount = (float)$genesis->request()->getAmount();
+		if ($amount <= $data['sca_exemption_amount']) {
+			$genesis->request()->setScaExemption($data['sca_exemption_value']);
+		}
+	}
+
+	/**
+	 * Check settings if 3DSv2 is enabled
+	 *
+	 * @return bool
+	 */
+	protected function isThreedsAllowed(): bool {
+		return (bool)$this->config->get($this->module_name . '_threeds_allowed');
+	}
+
+	/**
+	 * Check whether the selected transaction type is a 3d transaction
+	 *
+	 * @return bool
+	 */
+	protected function is3dTransaction(): bool {
+		$types = array(
+			Types::AUTHORIZE_3D,
+			Types::SALE_3D,
+			Types::INIT_RECURRING_SALE_3D,
+		);
+
+		$transaction_type = $this->config->get(
+			$this->isRecurringOrder() ? "{$this->module_name}_recurring_transaction_type" : "{$this->module_name}_transaction_type"
+		);
+
+		return in_array($transaction_type, $types);
+	}
+
+	/**
+	 * Bootstrap Genesis Library
+	 *
+	 * @return void
+	 *
+	 * @throws InvalidArgument
+	 */
+	public function bootstrap(): void {
+		// Look for, but DO NOT try to load via Auto-loader magic methods
+		if (!class_exists('\Genesis\Genesis', false)) {
+			include DIR_STORAGE . 'vendor/genesisgateway/genesis_php/vendor/autoload.php';
+		}
+
+		Config::setEndpoint(
+			Endpoints::ECOMPROCESSING
+		);
+
+		Config::setUsername(
+			$this->config->get("{$this->module_name}_username")
+		);
+
+		Config::setPassword(
+			$this->config->get("{$this->module_name}_password")
+		);
+
+		Config::setEnvironment(
+			$this->config->get("{$this->module_name}_sandbox") ? Environments::STAGING : Environments::PRODUCTION
+		);
+	}
+
+	/**
 	 * Generates a comma-separated list of the order statuses that should not be re-billed
 	 *
 	 * @return string
 	 */
-	private function getNonBillableOrderStatuses(): string
-	{
+	private function getNonBillableOrderStatuses(): string {
 		return self::OC_ORD_STATUS_CANCELED
 			. ',' . self::OC_ORD_STATUS_DENIED
 			. ',' . self::OC_ORD_STATUS_CANCELED_REVERSAL
@@ -925,8 +1015,7 @@ abstract class BaseModel extends Model
 	 *
 	 * @return string|null
 	 */
-	private function getTerminalToken($transaction): string|null
-	{
+	private function getTerminalToken($transaction): string|null {
 		if (!empty($this->config->get($this->module_name . '_recurring_token'))) {
 			$result = $this->config->get($this->module_name . '_recurring_token');
 		} elseif ($this->module_name == 'ecomprocessing_direct') {
@@ -941,27 +1030,26 @@ abstract class BaseModel extends Model
 	/**
 	 * Calculates whether now is a "pay day" (the due-date of the recurring order)
 	 *
-	 * @param \DateTime $now
-	 * @param \DateTime $start_payment
+	 * @param DateTime $now
+	 * @param DateTime $start_payment
 	 * @param string $frequency
 	 * @param string $cycle
 	 * @param string $duration
 	 *
 	 * @return bool
 	 */
-	private function isPayDay($now, $start_payment, $frequency, $cycle, $duration): bool
-	{
+	private function isPayDay($now, $start_payment, $frequency, $cycle, $duration): bool {
 		$result = false;
 
 		$payment_no = 0;
 
-		$due_day = new \DateTime('0000-00-00');
+		$due_day = new DateTime('0000-00-00');
 
 		if ($duration == 0) {
 			$duration = 1e6;
 		}
 
-		while(($payment_no <= $duration-1) && ($due_day < $now)) {
+		while (($payment_no <= $duration-1) && ($due_day < $now)) {
 			$due_day = $this->getPaymentDueDate(clone $start_payment, $frequency, $cycle * $payment_no);
 			if ($due_day == $now) {
 				$result = true;
@@ -975,14 +1063,13 @@ abstract class BaseModel extends Model
 	/**
 	 * Calculates the payment due date
 	 *
-	 * @param \DateTime $payment start day of the recurring
+	 * @param DateTime $payment start day of the recurring
 	 * @param string $frequency recurring frequency
 	 * @param string $cycle recurring cycle
 	 *
-	 * @return \DateTime
+	 * @return DateTime
 	 */
-	private function getPaymentDueDate($payment, $frequency, $cycle): \DateTime
-	{
+	private function getPaymentDueDate($payment, $frequency, $cycle): DateTime {
 		if ($frequency == 'semi_month') {
 			$payment2 = clone $payment;
 			$payment2->modify('+ 1 month');
