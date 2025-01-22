@@ -1,3 +1,5 @@
+\*CAUTION\* The e-comprocessing Gateway Module Plugin for OpenCart 4.0 is deprecated and will no longer receive updates.
+=============================
 E-Comprocessing Gateway Module for OpenCart
 ========================================
 [![Software License](https://img.shields.io/badge/license-GPL-green.svg?style=flat)](http://opensource.org/licenses/gpl-2.0.php)
